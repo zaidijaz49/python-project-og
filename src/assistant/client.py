@@ -53,6 +53,30 @@ def is_transient(exc: BaseException) -> bool:
     )
 
 
+def make_retryer(wait: wait_base, max_attempts: int) -> Retrying:
+    """Retry rules shared by GeminiClient and GeminiAgent."""
+    return Retrying(
+        retry=retry_if_exception(is_transient),
+        stop=stop_after_attempt(max_attempts),
+        wait=wait,
+        reraise=True,  # after the last attempt, raise the real error
+    )
+
+
+def sdk_from_env() -> tuple[genai.Client, str]:
+    """Read GEMINI_API_KEY and GEMINI_MODEL from .env and build the Gemini SDK."""
+    load_dotenv()
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set. Add it to your .env file.")
+    model = os.getenv("GEMINI_MODEL") or DEFAULT_MODEL
+    sdk = genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS),
+    )
+    return sdk, model
+
+
 class GeminiClient:
     """Calls the real Gemini API, with retries on temporary errors."""
 
@@ -72,24 +96,11 @@ class GeminiClient:
     @classmethod
     def from_env(cls) -> "GeminiClient":
         """Build a client using GEMINI_API_KEY and GEMINI_MODEL from .env."""
-        load_dotenv()
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise RuntimeError("GEMINI_API_KEY is not set. Add it to your .env file.")
-        model = os.getenv("GEMINI_MODEL") or DEFAULT_MODEL
-        sdk = genai.Client(
-            api_key=api_key,
-            http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS),
-        )
+        sdk, model = sdk_from_env()
         return cls(sdk, model)
 
     def analyze(self, text: str) -> Analysis:
-        retryer = Retrying(
-            retry=retry_if_exception(is_transient),
-            stop=stop_after_attempt(self._max_attempts),
-            wait=self._wait,
-            reraise=True,  # after the last attempt, raise the real error
-        )
+        retryer = make_retryer(self._wait, self._max_attempts)
         raw = retryer(self._generate, text)
         return self._parse(raw)
 
