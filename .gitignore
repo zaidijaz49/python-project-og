@@ -18,3 +18,7 @@ dist/
 
 # Personal notes - never push .md files
 *.md
+
+# Frontend (Node)
+node_modules/
+frontend/dist/
