@@ -18,7 +18,7 @@ from tenacity.wait import wait_base
 
 from assistant.models import Analysis
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.5-flash"
 REQUEST_TIMEOUT_MS = 30_000
 MAX_ATTEMPTS = 3
 
