@@ -101,6 +101,8 @@ def test_tool_call_then_answer():
     assert generate.call_count == 2
     # Gemini got the real data from our tool in the second call.
     assert last_tool_result(generate)["status"] == "shipped"
+    # Tool results must be sent with role "user"; Gemini rejects role "tool".
+    assert generate.call_args.kwargs["contents"][-1].role == "user"
 
 
 def test_order_not_found_is_sent_back_to_gemini():
