@@ -32,7 +32,8 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """What POST /chat returns: the answer and which tools were used."""
+    """What POST /chat returns: the answer, tools used, and which model answered."""
 
     answer: str
     tools_used: list[str]
+    model_used: str | None = None

@@ -140,6 +140,7 @@ def test_chat_returns_answer_and_tools_used():
         ChatResponse(
             answer="Your headphones have been shipped.",
             tools_used=["check_order_status"],
+            model_used="gemini-test",
         )
     )
     use_agent(mock)
@@ -150,6 +151,7 @@ def test_chat_returns_answer_and_tools_used():
     assert response.json() == {
         "answer": "Your headphones have been shipped.",
         "tools_used": ["check_order_status"],
+        "model_used": "gemini-test",
     }
     assert mock.calls == ["Where is my order O105?"]
 

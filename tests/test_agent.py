@@ -21,11 +21,11 @@ def tool_request(name, **args):
     return MagicMock(function_calls=[call], candidates=[MagicMock(content=content)])
 
 
-def make_agent(*outcomes):
+def make_agent(*outcomes, models=("test-model",)):
     """GeminiAgent with a fake SDK. Each outcome is one Gemini call's result."""
     sdk = MagicMock()
     sdk.models.generate_content.side_effect = list(outcomes)
-    agent = GeminiAgent(sdk, model="test-model", wait=wait_none())
+    agent = GeminiAgent(sdk, models=list(models), wait=wait_none())
     return agent, sdk.models.generate_content
 
 
@@ -86,6 +86,7 @@ def test_tools_are_given_to_gemini_but_not_auto_run():
     config = generate.call_args.kwargs["config"]
     assert len(config.tools) == 2
     assert config.automatic_function_calling.disable is True
+    assert config.thinking_config.thinking_level == types.ThinkingLevel.LOW
 
 
 def test_tool_call_then_answer():
@@ -165,6 +166,55 @@ def test_no_retry_on_401():
         agent.chat("Hi")
 
     assert generate.call_count == 1
+
+
+# ---------- fallback to the next model ----------
+
+
+def test_answer_says_which_model_was_used():
+    agent, _ = make_agent(text_answer("Hi"), models=["model-a", "model-b"])
+
+    assert agent.chat("Hello").model_used == "model-a"
+
+
+def test_fallback_restarts_chat_on_next_model():
+    agent, generate = make_agent(
+        tool_request("check_order_status", order_id="O105"),  # model-a round 1
+        errors.ClientError(429, {}),  # model-a round 2: quota used up
+        tool_request("check_order_status", order_id="O105"),  # model-b round 1
+        text_answer("Your order has shipped."),  # model-b round 2
+        models=["model-a", "model-b"],
+    )
+
+    result = agent.chat("Where is O105?")
+
+    calls = generate.call_args_list
+    assert [c.kwargs["model"] for c in calls] == [
+        "model-a",
+        "model-a",
+        "model-b",
+        "model-b",
+    ]
+    # model-b started fresh: a new conversation, not model-a's one continued.
+    model_a_chat = calls[0].kwargs["contents"]
+    model_b_chat = calls[2].kwargs["contents"]
+    assert model_b_chat is not model_a_chat
+    assert len(model_b_chat) == 3  # user message, tool request, tool result
+    assert result.model_used == "model-b"
+    assert result.tools_used == ["check_order_status"]  # not counted twice
+
+
+def test_agent_loop_error_does_not_fall_back():
+    # Too many tool rounds is not a quota/server problem, so no next model.
+    agent, generate = make_agent(
+        *[tool_request("get_user_account", user_id="U001")] * 5,
+        models=["model-a", "model-b"],
+    )
+
+    with pytest.raises(AgentError):
+        agent.chat("Loop forever")
+
+    assert generate.call_count == 5
 
 
 # ---------- MockAgent ----------

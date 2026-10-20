@@ -7,7 +7,14 @@ from google.genai import types
 from tenacity import wait_exponential
 from tenacity.wait import wait_base
 
-from assistant.client import DEFAULT_MODEL, MAX_ATTEMPTS, make_retryer, sdk_from_env
+from assistant.client import (
+    DEFAULT_MODELS,
+    MAX_ATTEMPTS,
+    THINKING,
+    make_retryer,
+    sdk_from_env,
+    try_models,
+)
 from assistant.models import ChatResponse
 from assistant.tools import TOOLS
 
@@ -54,24 +61,36 @@ class GeminiAgent:
     def __init__(
         self,
         sdk_client: genai.Client,
-        model: str = DEFAULT_MODEL,
+        models: list[str] | None = None,
         wait: wait_base | None = None,
         max_attempts: int = MAX_ATTEMPTS,
         max_rounds: int = MAX_ROUNDS,
     ) -> None:
         self._sdk = sdk_client
-        self._model = model
+        self._models = models or list(DEFAULT_MODELS)
         self._wait = wait or wait_exponential(multiplier=1, min=1, max=8)
         self._max_attempts = max_attempts
         self._max_rounds = max_rounds
 
     @classmethod
     def from_env(cls) -> "GeminiAgent":
-        """Build an agent using GEMINI_API_KEY and GEMINI_MODEL from .env."""
-        sdk, model = sdk_from_env()
-        return cls(sdk, model)
+        """Build an agent using GEMINI_API_KEY and GEMINI_MODELS from .env."""
+        sdk, models = sdk_from_env()
+        return cls(sdk, models)
 
     def chat(self, message: str) -> ChatResponse:
+        # If a model fails, the WHOLE chat starts again on the next model.
+        # We never switch models in the middle of one conversation, because
+        # Gemini 3 models attach data to their replies that another model
+        # may not accept.
+        response, model = try_models(
+            self._models, lambda model: self._chat_with_model(model, message)
+        )
+        response.model_used = model
+        return response
+
+    def _chat_with_model(self, model: str, message: str) -> ChatResponse:
+        """The tool-calling loop, using one model from start to finish."""
         config = types.GenerateContentConfig(
             system_instruction=AGENT_PROMPT,
             tools=list(TOOLS.values()),  # Gemini reads their names + docstrings
@@ -79,6 +98,7 @@ class GeminiAgent:
             automatic_function_calling=types.AutomaticFunctionCallingConfig(
                 disable=True
             ),
+            thinking_config=THINKING,  # think less = answer faster
         )
 
         # The whole conversation so far. We keep adding to it each round.
@@ -93,7 +113,7 @@ class GeminiAgent:
         tools_used: list[str] = []
 
         for _ in range(self._max_rounds):
-            response = self._ask_gemini(contents, config)
+            response = self._ask_gemini(model, contents, config)
 
             # No tool requested: this is the final answer.
             if not response.function_calls:
@@ -121,13 +141,16 @@ class GeminiAgent:
         raise AgentError("Too many tool calls; stopped to avoid a loop.")
 
     def _ask_gemini(
-        self, contents: list[types.Content], config: types.GenerateContentConfig
+        self,
+        model: str,
+        contents: list[types.Content],
+        config: types.GenerateContentConfig,
     ) -> types.GenerateContentResponse:
         """One Gemini call, with the same retry rules as GeminiClient."""
         retryer = make_retryer(self._wait, self._max_attempts)
         return retryer(
             self._sdk.models.generate_content,
-            model=self._model,
+            model=model,
             contents=contents,
             config=config,
         )
