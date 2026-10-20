@@ -4,6 +4,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from google.genai import errors
 
 from assistant.client import AIClient, AIResponseError, GeminiClient
+from assistant.guardrails import GuardrailError, check_text
 from assistant.models import Analysis, AnalyzeRequest
 
 app = FastAPI(title="Text Analyzer")
@@ -26,7 +27,12 @@ def analyze(
 ) -> Analysis:
     """Take user text, send it to the AI, return summary + sentiment + tags."""
     try:
-        return client.analyze(request.text)
+        safe_text = check_text(request.text)  # first the guard
+        return client.analyze(safe_text)  # then the AI
+
+    except GuardrailError as exc:
+        # The guard blocked the text. The AI was never called.
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
     except AIResponseError:
         # Gemini answered, but the answer was broken.

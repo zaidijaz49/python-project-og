@@ -37,6 +37,10 @@ def test_success_returns_analysis():
     )
     assert generate.call_count == 1
     assert generate.call_args.kwargs["config"].response_schema is Analysis
+    # The user text is wrapped in tags so Gemini treats it as data only.
+    assert generate.call_args.kwargs["contents"] == (
+        "<user_text>\nI had a good day\n</user_text>"
+    )
 
 
 def test_invalid_json_raises_error():
