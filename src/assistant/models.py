@@ -8,7 +8,7 @@ Sentiment = Literal["positive", "negative", "neutral"]
 
 
 class AnalyzeRequest(BaseModel):
-    """What the user sends to POST /analyze."""
+    """What the user sends to POST /api/v1/ai/analyze."""
 
     text: str = Field(min_length=1, max_length=10_000)
 
@@ -26,13 +26,13 @@ class Analysis(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """What the user sends to POST /chat."""
+    """What the user sends to POST /api/v1/ai/chat."""
 
     message: str = Field(min_length=1, max_length=2_000)
 
 
 class ChatResponse(BaseModel):
-    """What POST /chat returns: the answer, tools used, and which model answered."""
+    """What POST /api/v1/ai/chat returns: answer, tools used and the model used."""
 
     answer: str
     tools_used: list[str]
@@ -40,14 +40,15 @@ class ChatResponse(BaseModel):
 
 
 class AskRequest(BaseModel):
-    """What the user sends to POST /ask."""
+    """What the user sends to POST /api/v1/ai/query."""
 
     question: str = Field(min_length=1, max_length=2_000)
 
 
 class AskResponse(BaseModel):
-    """What POST /ask returns: the answer and the doc chunks it came from."""
+    """What POST /api/v1/ai/query returns: the answer and its doc chunks."""
 
     answer: str
     sources: list[str]
     found: bool
+    cached: bool = False  # True = came from the cache, the AI was not called
