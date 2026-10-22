@@ -1,12 +1,23 @@
 """FastAPI app: the door through which users talk to our AI client."""
 
+from functools import lru_cache
+
+import groq
 from fastapi import Depends, FastAPI, HTTPException
 from google.genai import errors
 
 from assistant.agent import AgentError, ChatAgent, GeminiAgent
 from assistant.client import AIClient, AIResponseError, GeminiClient
 from assistant.guardrails import GuardrailError, check_text
-from assistant.models import Analysis, AnalyzeRequest, ChatRequest, ChatResponse
+from assistant.models import (
+    Analysis,
+    AnalyzeRequest,
+    AskRequest,
+    AskResponse,
+    ChatRequest,
+    ChatResponse,
+)
+from assistant.rag.answer import RagAssistant
 
 app = FastAPI(title="Customer Support Assistant")
 
@@ -19,6 +30,16 @@ def get_client() -> AIClient:
 def get_agent() -> ChatAgent:
     """Give FastAPI the chat agent. Tests replace this with MockAgent."""
     return GeminiAgent.from_env()
+
+
+@lru_cache
+def get_rag() -> RagAssistant:
+    """Give FastAPI the RAG assistant. Tests replace this with a mock version.
+
+    lru_cache builds it on the first request and reuses it after that, so the
+    index and the embedding model are not loaded again for every question.
+    """
+    return RagAssistant.from_env()
 
 
 @app.get("/health")
@@ -72,6 +93,24 @@ def chat(request: ChatRequest, agent: ChatAgent = Depends(get_agent)) -> ChatRes
 
     except errors.APIError:
         # Gemini is busy or down (even after 3 tries).
+        raise HTTPException(
+            status_code=503, detail="AI service is unavailable"
+        ) from None
+
+
+@app.post("/ask")
+def ask(request: AskRequest, rag: RagAssistant = Depends(get_rag)) -> AskResponse:
+    """Answer a question using only the help docs in knowledge/."""
+    try:
+        safe_question = check_text(request.question)  # first the guard
+        return AskResponse(**rag.ask(safe_question))  # then search + AI
+
+    except GuardrailError as exc:
+        # The guard blocked the question. Search and AI were never called.
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    except groq.APIError:
+        # Groq is busy, down, or the key is wrong.
         raise HTTPException(
             status_code=503, detail="AI service is unavailable"
         ) from None
