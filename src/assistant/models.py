@@ -37,3 +37,17 @@ class ChatResponse(BaseModel):
     answer: str
     tools_used: list[str]
     model_used: str | None = None
+
+
+class AskRequest(BaseModel):
+    """What the user sends to POST /ask."""
+
+    question: str = Field(min_length=1, max_length=2_000)
+
+
+class AskResponse(BaseModel):
+    """What POST /ask returns: the answer and the doc chunks it came from."""
+
+    answer: str
+    sources: list[str]
+    found: bool
