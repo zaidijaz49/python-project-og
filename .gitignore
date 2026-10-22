@@ -16,6 +16,9 @@ dist/
 .pytest_cache/
 .ruff_cache/
 
+# RAG index - rebuilt from knowledge/ with scripts/build_index.py
+data/
+
 # Personal notes - never push .md files
 *.md
 
