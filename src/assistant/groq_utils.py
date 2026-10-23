@@ -1,5 +1,5 @@
 """Shared Groq helpers: build the SDK from .env, retry hiccups, fall back to
-the next model. Used by the chat agent and by the RAG answer step."""
+the next model. Used by the chat agent."""
 
 import logging
 import os
@@ -62,7 +62,7 @@ def should_try_next_model(exc: BaseException) -> bool:
 
 
 def make_retryer(wait: wait_base, max_attempts: int) -> Retrying:
-    """Retry rules shared by GroqAgent and GroqLLM."""
+    """Retry rules for every Groq call."""
     return Retrying(
         retry=retry_if_exception(is_transient),
         stop=stop_after_attempt(max_attempts),

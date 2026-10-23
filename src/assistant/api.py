@@ -1,4 +1,4 @@
-"""FastAPI app: the door through which users talk to our AI client."""
+"""FastAPI app: the door through which users talk to our AI chatbot."""
 
 from functools import lru_cache
 
@@ -8,13 +8,8 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from assistant.agent import AgentError, ChatAgent, GroqAgent
 from assistant.cache import SimpleCache
 from assistant.guardrails import GuardrailError, check_text
-from assistant.models import (
-    AskRequest,
-    AskResponse,
-    ChatRequest,
-    ChatResponse,
-)
-from assistant.rag.answer import RagAssistant
+from assistant.models import ChatRequest, ChatResponse
+from assistant.tools import PERSONAL_TOOLS
 
 app = FastAPI(title="Customer Support Assistant")
 
@@ -23,23 +18,19 @@ app = FastAPI(title="Customer Support Assistant")
 router = APIRouter(prefix="/api/v1")
 
 
+@lru_cache
 def get_agent() -> ChatAgent:
-    """Give FastAPI the chat agent. Tests replace this with MockAgent."""
+    """Give FastAPI the chat agent. Tests replace this with MockAgent.
+
+    lru_cache builds it on the first request and reuses it after that, so the
+    doc index and the embedding model are not loaded again for every message.
+    """
     return GroqAgent.from_env()
 
 
-@lru_cache
-def get_rag() -> RagAssistant:
-    """Give FastAPI the RAG assistant. Tests replace this with a mock version.
-
-    lru_cache builds it on the first request and reuses it after that, so the
-    index and the embedding model are not loaded again for every question.
-    """
-    return RagAssistant.from_env()
-
-
-# One cache for the whole server, shared by every user. That's safe here because
-# /ai/query answers come only from the help docs, which are the same for everyone.
+# One cache for the whole server, shared by every user. We only save answers
+# that used no personal tools (see PERSONAL_TOOLS), so nobody ever gets another
+# customer's account or order details.
 answer_cache = SimpleCache()
 
 
@@ -55,11 +46,27 @@ def health():
 
 
 @router.post("/ai/chat")
-def chat(request: ChatRequest, agent: ChatAgent = Depends(get_agent)) -> ChatResponse:
-    """Answer a customer question. The AI may look up accounts and orders."""
+def chat(
+    request: ChatRequest,
+    agent: ChatAgent = Depends(get_agent),
+    cache: SimpleCache = Depends(get_cache),
+) -> ChatResponse:
+    """Answer a customer: orders and accounts (tools) and store policies (docs)."""
     try:
         safe_message = check_text(request.message)  # first the guard
-        return agent.chat(safe_message)  # then the agent (Groq + tools)
+
+        # Asked before? Return the saved answer and skip the AI.
+        saved = cache.get(safe_message)
+        if saved is not None:
+            return ChatResponse(**saved, cached=True)
+
+        response = agent.chat(safe_message)  # then the agent (Groq + tools)
+
+        # Only answers without anyone's own data are safe to share. Errors jump
+        # to "except" below, so they are never saved either.
+        if not PERSONAL_TOOLS & set(response.tools_used):
+            cache.set(safe_message, response.model_dump(exclude={"cached"}))
+        return response
 
     except GuardrailError as exc:
         # The guard blocked the message. The AI was never called.
@@ -73,38 +80,6 @@ def chat(request: ChatRequest, agent: ChatAgent = Depends(get_agent)) -> ChatRes
 
     except groq.APIError:
         # Groq is busy or down (even after 3 tries), or the key is wrong.
-        raise HTTPException(
-            status_code=503, detail="AI service is unavailable"
-        ) from None
-
-
-@router.post("/ai/query")
-def query(
-    request: AskRequest,
-    rag: RagAssistant = Depends(get_rag),
-    cache: SimpleCache = Depends(get_cache),
-) -> AskResponse:
-    """Answer a question using only the help docs in knowledge/."""
-    try:
-        safe_question = check_text(request.question)  # first the guard
-
-        # Asked before? Return the saved answer and skip search + AI.
-        saved = cache.get(safe_question)
-        if saved is not None:
-            return AskResponse(**saved, cached=True)
-
-        result = rag.ask(safe_question)  # then search + AI
-        # Only reached when the AI answered. Errors jump to "except" below,
-        # so they are never saved in the cache.
-        cache.set(safe_question, result)
-        return AskResponse(**result, cached=False)
-
-    except GuardrailError as exc:
-        # The guard blocked the question. Search and AI were never called.
-        raise HTTPException(status_code=400, detail=str(exc)) from None
-
-    except groq.APIError:
-        # Groq is busy, down, or the key is wrong.
         raise HTTPException(
             status_code=503, detail="AI service is unavailable"
         ) from None

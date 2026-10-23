@@ -73,5 +73,6 @@ def test_allowlist_has_only_our_tools():
 
 def test_every_tool_has_a_schema():
     # Groq only knows about tools listed in TOOL_SCHEMAS, so the two must match.
+    # search_help_docs is added by the agent, because it needs the doc index.
     schema_names = [schema["function"]["name"] for schema in TOOL_SCHEMAS]
-    assert schema_names == list(TOOLS)
+    assert schema_names == [*TOOLS, "search_help_docs"]

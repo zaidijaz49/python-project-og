@@ -70,6 +70,7 @@ TOOLS = {
 
 # What we tell the AI about each tool: its name, what it does, and its inputs.
 # Groq reads this (JSON schema format), it can't read our Python code.
+# search_help_docs is not in TOOLS: it needs the doc index, so the agent adds it.
 TOOL_SCHEMAS = [
     {
         "type": "function",
@@ -99,4 +100,29 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_help_docs",
+            "description": (
+                "Search QuickCart's help docs (orders, payments, refunds and "
+                "returns, shipping, account and login, contact). Use it for any "
+                "question about how the store works."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The customer's question, in English",
+                    }
+                },
+                "required": ["question"],
+            },
+        },
+    },
 ]
+
+# Tools that read one customer's own data. Answers that used them are personal,
+# so they must never be cached and shown to someone else.
+PERSONAL_TOOLS = {"get_user_account", "check_order_status"}

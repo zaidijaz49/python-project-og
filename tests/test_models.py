@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from assistant.models import AskRequest, ChatRequest
+from assistant.models import ChatRequest
 
 
 def test_chat_message_is_accepted():
@@ -14,9 +14,3 @@ def test_chat_message_is_accepted():
 def test_chat_message_empty_or_too_long_fails(message):
     with pytest.raises(ValidationError):
         ChatRequest(message=message)
-
-
-@pytest.mark.parametrize("question", ["", "a" * 2_001])
-def test_question_empty_or_too_long_fails(question):
-    with pytest.raises(ValidationError):
-        AskRequest(question=question)

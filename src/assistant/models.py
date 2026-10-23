@@ -10,23 +10,10 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """What POST /api/v1/ai/chat returns: answer, tools used and the model used."""
+    """What POST /api/v1/ai/chat returns."""
 
     answer: str
     tools_used: list[str]
+    sources: list[str] = []  # help doc sections used, e.g. "refunds.md#3"
     model_used: str | None = None
-
-
-class AskRequest(BaseModel):
-    """What the user sends to POST /api/v1/ai/query."""
-
-    question: str = Field(min_length=1, max_length=2_000)
-
-
-class AskResponse(BaseModel):
-    """What POST /api/v1/ai/query returns: the answer and its doc chunks."""
-
-    answer: str
-    sources: list[str]
-    found: bool
     cached: bool = False  # True = came from the cache, the AI was not called

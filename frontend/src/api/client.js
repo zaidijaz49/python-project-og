@@ -10,7 +10,7 @@ const COMMON_ERRORS = {
 
 const CHAT_ERRORS = {
   ...COMMON_ERRORS,
-  400: "Sorry, I can't help with that request. Please ask me about your orders or your account.",
+  400: "Sorry, I can't help with that request. Please ask me about your orders, your account or our store policies.",
   422: "Sorry, I couldn't read that message. Please type a short question and try again.",
   502: "Sorry, I couldn't finish that answer. Please try asking again.",
   503: "Sorry, I'm a little busy right now. Please try again in a minute.",

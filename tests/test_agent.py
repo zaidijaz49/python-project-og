@@ -39,11 +39,24 @@ def status_error(code):
     return groq.APIStatusError(f"HTTP {code}", response=response, body=None)
 
 
-def make_agent(*outcomes, models=("test-model",)):
+class FakeDocs:
+    """Fake help docs: no index, no model. Always finds the refund section."""
+
+    def __init__(self):
+        self.questions = []
+
+    def search_help_docs(self, question):
+        self.questions.append(question)
+        return {
+            "sections": [{"id": "refunds.md#3", "text": "Refunds take 7 working days."}]
+        }
+
+
+def make_agent(*outcomes, models=("test-model",), docs=None):
     """GroqAgent with a fake SDK. Each outcome is one Groq call's result."""
     sdk = MagicMock()
     sdk.chat.completions.create.side_effect = list(outcomes)
-    agent = GroqAgent(sdk, models=list(models), wait=wait_none())
+    agent = GroqAgent(sdk, docs=docs, models=list(models), wait=wait_none())
     return agent, sdk.chat.completions.create
 
 
@@ -104,13 +117,25 @@ def test_message_is_wrapped_in_tags():
     assert user_message["content"] == "<user_text>\nHello\n</user_text>"
 
 
-def test_tool_schemas_are_given_to_groq():
+def tool_names(create):
+    return [schema["function"]["name"] for schema in create.call_args.kwargs["tools"]]
+
+
+def test_without_docs_only_order_and_account_tools_are_offered():
     agent, create = make_agent(text_answer("Hi"))
 
     agent.chat("Hello")
 
-    assert create.call_args.kwargs["tools"] == TOOL_SCHEMAS
+    assert tool_names(create) == ["get_user_account", "check_order_status"]
     assert create.call_args.kwargs["tool_choice"] == "auto"
+
+
+def test_with_docs_all_three_tools_are_offered():
+    agent, create = make_agent(text_answer("Hi"), docs=FakeDocs())
+
+    agent.chat("Hello")
+
+    assert create.call_args.kwargs["tools"] == TOOL_SCHEMAS
 
 
 def test_tool_call_then_answer():
@@ -128,6 +153,49 @@ def test_tool_call_then_answer():
     assert last_tool_result(create)["status"] == "shipped"
     # The tool result is linked to the AI's request by its id.
     assert create.call_args.kwargs["messages"][-1]["tool_call_id"] == "call_1"
+
+
+def test_help_docs_tool_gives_sources():
+    docs = FakeDocs()
+    agent, create = make_agent(
+        tool_request("search_help_docs", question="How long does a refund take?"),
+        text_answer("Refunds take 7 working days."),
+        docs=docs,
+    )
+
+    result = agent.chat("Refund time?")
+
+    assert docs.questions == ["How long does a refund take?"]
+    assert result.tools_used == ["search_help_docs"]
+    assert result.sources == ["refunds.md#3"]
+    assert last_tool_result(create)["sections"][0]["id"] == "refunds.md#3"
+
+
+def test_order_and_docs_in_one_message():
+    # "Where is O105, and how do returns work?" needs both kinds of tool.
+    agent, _ = make_agent(
+        tool_request("check_order_status", order_id="O105"),
+        tool_request("search_help_docs", question="How do returns work?"),
+        text_answer("O105 has shipped. You can return it within 14 days."),
+        docs=FakeDocs(),
+    )
+
+    result = agent.chat("Where is O105, and how do returns work?")
+
+    assert result.tools_used == ["check_order_status", "search_help_docs"]
+    assert result.sources == ["refunds.md#3"]
+
+
+def test_help_docs_tool_is_blocked_without_docs():
+    agent, create = make_agent(
+        tool_request("search_help_docs", question="Refund time?"),
+        text_answer("Sorry, I can't check that right now."),
+    )
+
+    result = agent.chat("Refund time?")
+
+    assert result.tools_used == []
+    assert last_tool_result(create) == {"error": "Unknown tool: search_help_docs"}
 
 
 def test_order_not_found_is_sent_back_to_groq():
