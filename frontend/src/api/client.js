@@ -1,4 +1,4 @@
-// Talks to the FastAPI backend (through the Vite proxy: /api/... -> :8002/...).
+// Talks to the FastAPI backend (through the Vite proxy: /api/v1/... -> :8002/api/v1/...).
 
 const TIMEOUT_MS = 60_000;
 
@@ -38,7 +38,7 @@ async function request(path, body, messages = CHAT_ERRORS) {
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const response = await fetch(`/api${path}`, {
+    const response = await fetch(`/api/v1${path}`, {
       method: body ? "POST" : "GET",
       headers: { "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,
@@ -56,6 +56,6 @@ async function request(path, body, messages = CHAT_ERRORS) {
 
 export const api = {
   health: () => request("/health"),
-  chat: (message) => request("/chat", { message }, CHAT_ERRORS),
-  analyze: (text) => request("/analyze", { text }, REVIEW_ERRORS),
+  chat: (message) => request("/ai/chat", { message }, CHAT_ERRORS),
+  analyze: (text) => request("/ai/analyze", { text }, REVIEW_ERRORS),
 };
