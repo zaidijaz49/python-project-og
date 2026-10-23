@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { QUICK_REPLIES } from "../../data/products";
 import { useServerStatus } from "../../hooks/useServerStatus";
+import LoginForm from "../auth/LoginForm";
 import ChatHeader from "./ChatHeader";
 import ChatInput from "./ChatInput";
 import MessageBubble from "./MessageBubble";
@@ -8,7 +9,7 @@ import QuickReplies from "./QuickReplies";
 import RobotIcon from "./RobotIcon";
 import TypingIndicator from "./TypingIndicator";
 
-export default function ChatWidget({ chat, open, onOpen, onClose }) {
+export default function ChatWidget({ chat, auth, open, onOpen, onClose }) {
   const { messages, loading, send, retry, clear } = chat;
   const status = useServerStatus(open);
   const [showGreeting, setShowGreeting] = useState(true);
@@ -31,6 +32,7 @@ export default function ChatWidget({ chat, open, onOpen, onClose }) {
   }, [open, onClose]);
 
   const onlyWelcome = messages.length === 1;
+  const loggedIn = Boolean(auth.session);
 
   return (
     <>
@@ -40,25 +42,40 @@ export default function ChatWidget({ chat, open, onOpen, onClose }) {
           aria-label="Support chat"
           className="fixed inset-0 z-50 flex animate-pop-in flex-col overflow-hidden bg-slate-50 sm:inset-auto sm:bottom-24 sm:right-6 sm:h-[600px] sm:max-h-[calc(100vh-8rem)] sm:w-[380px] sm:rounded-2xl sm:shadow-2xl sm:ring-1 sm:ring-slate-200"
         >
-          <ChatHeader status={status} onClear={clear} onClose={onClose} disabled={loading} />
+          <ChatHeader
+            status={status}
+            email={auth.email}
+            onClear={clear}
+            onLogOut={auth.logOut}
+            onClose={onClose}
+            disabled={loading}
+          />
 
-          <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-            {messages.map((message) => (
-              <MessageBubble
-                key={message.id}
-                message={message}
-                onRetry={retry}
-                retryDisabled={loading}
-              />
-            ))}
-            {loading && <TypingIndicator />}
-            <div ref={bottomRef} />
-          </div>
+          {auth.checking ? (
+            <div className="flex-1" />
+          ) : !loggedIn ? (
+            <LoginForm onLogIn={auth.logIn} />
+          ) : (
+            <>
+              <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+                {messages.map((message) => (
+                  <MessageBubble
+                    key={message.id}
+                    message={message}
+                    onRetry={retry}
+                    retryDisabled={loading}
+                  />
+                ))}
+                {loading && <TypingIndicator />}
+                <div ref={bottomRef} />
+              </div>
 
-          {onlyWelcome && !loading && (
-            <QuickReplies options={QUICK_REPLIES} onPick={send} disabled={loading} />
+              {onlyWelcome && !loading && (
+                <QuickReplies options={QUICK_REPLIES} onPick={send} disabled={loading} />
+              )}
+              <ChatInput ref={inputRef} onSend={send} loading={loading} />
+            </>
           )}
-          <ChatInput ref={inputRef} onSend={send} loading={loading} />
         </div>
       )}
 

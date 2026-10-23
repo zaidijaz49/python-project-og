@@ -1,5 +1,7 @@
 // Talks to the FastAPI backend (through the Vite proxy: /api/v1/... -> :8002/api/v1/...).
 
+import { supabase } from "../lib/supabase";
+
 const TIMEOUT_MS = 60_000;
 
 // Friendly messages the customer sees. Never show raw server errors.
@@ -10,18 +12,11 @@ const COMMON_ERRORS = {
 
 const CHAT_ERRORS = {
   ...COMMON_ERRORS,
-  400: "Sorry, I can't help with that request. Please ask me about your orders or your account.",
+  401: "Your login has expired. Please log in again.",
+  400: "Sorry, I can't help with that request. Please ask me about your orders, your account or our store policies.",
   422: "Sorry, I couldn't read that message. Please type a short question and try again.",
   502: "Sorry, I couldn't finish that answer. Please try asking again.",
   503: "Sorry, I'm a little busy right now. Please try again in a minute.",
-};
-
-const REVIEW_ERRORS = {
-  ...COMMON_ERRORS,
-  400: "Sorry, we couldn't accept this review. Please write about the product.",
-  422: "Sorry, this review looks empty or too long.",
-  502: "Sorry, we couldn't analyze your review. Please try again.",
-  503: "Sorry, review analysis is busy right now. Please try again in a minute.",
 };
 
 export class ApiError extends Error {
@@ -29,7 +24,7 @@ export class ApiError extends Error {
     super(messages[kind] ?? messages[503]);
     this.kind = kind;
     // Only some problems are worth a "Retry" button. A blocked message is not.
-    this.canRetry = kind !== 400 && kind !== 422;
+    this.canRetry = kind !== 400 && kind !== 401 && kind !== 422;
   }
 }
 
@@ -38,9 +33,16 @@ async function request(path, body, messages = CHAT_ERRORS) {
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
+    // The login token ("ticket"). The backend reads the customer ID from it.
+    const { data } = await supabase.auth.getSession();
+    const token = data.session?.access_token;
+
     const response = await fetch(`/api/v1${path}`, {
       method: body ? "POST" : "GET",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
@@ -57,5 +59,4 @@ async function request(path, body, messages = CHAT_ERRORS) {
 export const api = {
   health: () => request("/health"),
   chat: (message) => request("/ai/chat", { message }, CHAT_ERRORS),
-  analyze: (text) => request("/ai/analyze", { text }, REVIEW_ERRORS),
 };

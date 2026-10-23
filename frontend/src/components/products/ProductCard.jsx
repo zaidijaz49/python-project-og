@@ -1,7 +1,5 @@
 import { useState } from "react";
 import { formatPrice } from "../../data/products";
-import { countSentiments } from "../../hooks/useReviews";
-import { SENTIMENTS } from "../reviews/SentimentBadge";
 
 const STATUS_STYLES = {
   Shipped: "bg-sky-100 text-sky-700",
@@ -9,16 +7,9 @@ const STATUS_STYLES = {
   Delivered: "bg-emerald-100 text-emerald-700",
 };
 
-export default function ProductCard({
-  product,
-  reviews = [],
-  onAddToCart,
-  onTrackOrder,
-  onOpenReviews,
-}) {
+export default function ProductCard({ product, onAddToCart, onTrackOrder }) {
   const [added, setAdded] = useState(false);
   const { name, price, emoji, color, rating, order } = product;
-  const counts = countSentiments(reviews);
 
   function handleAdd() {
     onAddToCart();
@@ -44,26 +35,7 @@ export default function ProductCard({
       <div className="flex flex-1 flex-col gap-3 p-4">
         <div>
           <h3 className="font-semibold text-slate-900">{name}</h3>
-          <button
-            onClick={onOpenReviews}
-            className="flex items-center gap-2 text-sm text-slate-500 hover:text-brand-600"
-          >
-            <span>★ {rating.toFixed(1)}</span>
-            <span>·</span>
-            {reviews.length === 0 ? (
-              <span>No reviews</span>
-            ) : (
-              <span className="flex gap-1.5">
-                {Object.entries(counts)
-                  .filter(([, n]) => n > 0)
-                  .map(([key, n]) => (
-                    <span key={key}>
-                      {SENTIMENTS[key].emoji} {n}
-                    </span>
-                  ))}
-              </span>
-            )}
-          </button>
+          <p className="text-sm text-slate-500">★ {rating.toFixed(1)}</p>
         </div>
         <p className="text-lg font-bold text-slate-900">{formatPrice(price)}</p>
 
@@ -84,12 +56,6 @@ export default function ProductCard({
             </button>
           )}
         </div>
-        <button
-          onClick={onOpenReviews}
-          className="rounded-xl border border-slate-200 py-2 text-sm font-medium text-slate-600 hover:border-brand-500 hover:text-brand-600"
-        >
-          ✍ Write a review
-        </button>
       </div>
     </article>
   );

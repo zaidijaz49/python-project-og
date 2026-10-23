@@ -73,8 +73,8 @@ export const PRODUCTS = [
 
 export const QUICK_REPLIES = [
   "Where is my order O105?",
-  "Check order O106",
-  "What plan is user U001 on?",
+  "What plan am I on?",
+  "How long does a refund take?",
   "What can you help me with?",
 ];
 

@@ -12,7 +12,8 @@ function FormattedText({ text }) {
 
 const TOOL_LABELS = {
   check_order_status: "Checked order",
-  get_user_account: "Checked account",
+  get_my_account: "Checked account",
+  search_help_docs: "Searched help docs",
 };
 
 export default function MessageBubble({ message, onRetry, retryDisabled }) {

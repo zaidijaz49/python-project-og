@@ -6,7 +6,7 @@ const STATUS = {
   checking: { dot: "bg-amber-300", label: "Connecting…" },
 };
 
-export default function ChatHeader({ status, onClear, onClose, disabled }) {
+export default function ChatHeader({ status, email, onClear, onLogOut, onClose, disabled }) {
   const { dot, label } = STATUS[status];
 
   return (
@@ -18,17 +18,28 @@ export default function ChatHeader({ status, onClear, onClose, disabled }) {
         <p className="font-semibold leading-tight">Robo · TechMart Support</p>
         <p className="flex items-center gap-1.5 text-xs text-white/80">
           <span className={`h-2 w-2 rounded-full ${dot}`} />
-          {label}
+          {email ? `${label} · ${email}` : label}
         </p>
       </div>
-      <button
-        onClick={onClear}
-        disabled={disabled}
-        className="rounded-lg px-2 py-1 text-xs text-white/80 hover:bg-white/10 disabled:opacity-40"
-        title="Start a new chat"
-      >
-        New chat
-      </button>
+      {email && (
+        <>
+          <button
+            onClick={onClear}
+            disabled={disabled}
+            className="rounded-lg px-2 py-1 text-xs text-white/80 hover:bg-white/10 disabled:opacity-40"
+            title="Start a new chat"
+          >
+            New chat
+          </button>
+          <button
+            onClick={onLogOut}
+            disabled={disabled}
+            className="rounded-lg px-2 py-1 text-xs text-white/80 hover:bg-white/10 disabled:opacity-40"
+          >
+            Log out
+          </button>
+        </>
+      )}
       <button
         onClick={onClose}
         className="rounded-lg p-1.5 hover:bg-white/10"
