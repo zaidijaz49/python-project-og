@@ -2,6 +2,7 @@
 
 from assistant.tools import (
     ORDERS,
+    TOOL_SCHEMAS,
     TOOLS,
     check_order_status,
     get_user_account,
@@ -68,3 +69,9 @@ def test_tools_do_not_change_the_database():
 
 def test_allowlist_has_only_our_tools():
     assert set(TOOLS) == {"get_user_account", "check_order_status"}
+
+
+def test_every_tool_has_a_schema():
+    # Groq only knows about tools listed in TOOL_SCHEMAS, so the two must match.
+    schema_names = [schema["function"]["name"] for schema in TOOL_SCHEMAS]
+    assert schema_names == list(TOOLS)

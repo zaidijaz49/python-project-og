@@ -5,10 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "assistant"
 version = "0.1.0"
-description = "AI text analyzer: summary, sentiment and tags via Gemini"
+description = "AI customer support assistant: text analysis, tool-calling chat and RAG over help docs, via Groq"
 requires-python = ">=3.11"
 dependencies = [
-    "google-genai",
     "pydantic>=2",
     "tenacity",
     "python-dotenv",

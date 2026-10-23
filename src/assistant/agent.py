@@ -1,24 +1,23 @@
-"""Chat agent: Gemini answers customer questions and asks us to run tools for data."""
+"""Chat agent: Groq answers customer questions and asks us to run tools for data."""
 
+import json
 from typing import Any, Protocol
 
-from google import genai
-from google.genai import types
+import groq
 from tenacity import wait_exponential
 from tenacity.wait import wait_base
 
 from assistant.client import (
     DEFAULT_MODELS,
     MAX_ATTEMPTS,
-    THINKING,
     make_retryer,
     sdk_from_env,
     try_models,
 )
 from assistant.models import ChatResponse
-from assistant.tools import TOOLS
+from assistant.tools import TOOL_SCHEMAS, TOOLS
 
-MAX_ROUNDS = 5  # stop if Gemini keeps asking for tools, so we never loop forever
+MAX_ROUNDS = 5  # stop if the AI keeps asking for tools, so we never loop forever
 
 AGENT_PROMPT = (
     "You are a friendly customer support assistant. "
@@ -55,12 +54,21 @@ def run_tool(name: str, args: dict[str, Any]) -> dict:
         return {"error": f"Bad arguments for {name}"}
 
 
-class GeminiAgent:
-    """Talks to the real Gemini and runs our tools when Gemini asks for them."""
+def read_arguments(raw: str | None) -> dict:
+    """The AI sends tool arguments as a JSON string. Turn it into a dict."""
+    try:
+        args = json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return args if isinstance(args, dict) else {}
+
+
+class GroqAgent:
+    """Talks to the real Groq and runs our tools when the AI asks for them."""
 
     def __init__(
         self,
-        sdk_client: genai.Client,
+        sdk_client: groq.Groq,
         models: list[str] | None = None,
         wait: wait_base | None = None,
         max_attempts: int = MAX_ATTEMPTS,
@@ -73,16 +81,14 @@ class GeminiAgent:
         self._max_rounds = max_rounds
 
     @classmethod
-    def from_env(cls) -> "GeminiAgent":
-        """Build an agent using GEMINI_API_KEY and GEMINI_MODELS from .env."""
+    def from_env(cls) -> "GroqAgent":
+        """Build an agent using GROQ_API_KEY and GROQ_MODELS from .env."""
         sdk, models = sdk_from_env()
         return cls(sdk, models)
 
     def chat(self, message: str) -> ChatResponse:
-        # If a model fails, the WHOLE chat starts again on the next model.
-        # We never switch models in the middle of one conversation, because
-        # Gemini 3 models attach data to their replies that another model
-        # may not accept.
+        # If a model fails, the WHOLE chat starts again on the next model,
+        # so one conversation is always answered by one model.
         response, model = try_models(
             self._models, lambda model: self._chat_with_model(model, message)
         )
@@ -91,68 +97,67 @@ class GeminiAgent:
 
     def _chat_with_model(self, model: str, message: str) -> ChatResponse:
         """The tool-calling loop, using one model from start to finish."""
-        config = types.GenerateContentConfig(
-            system_instruction=AGENT_PROMPT,
-            tools=list(TOOLS.values()),  # Gemini reads their names + docstrings
-            # We run the tools ourselves, so the SDK must not run them for us.
-            automatic_function_calling=types.AutomaticFunctionCallingConfig(
-                disable=True
-            ),
-            thinking_config=THINKING,  # think less = answer faster
-        )
-
         # The whole conversation so far. We keep adding to it each round.
-        contents = [
-            types.Content(
-                role="user",
-                parts=[
-                    types.Part.from_text(text=f"<user_text>\n{message}\n</user_text>")
-                ],
-            )
+        messages = [
+            {"role": "system", "content": AGENT_PROMPT},
+            {"role": "user", "content": f"<user_text>\n{message}\n</user_text>"},
         ]
         tools_used: list[str] = []
 
         for _ in range(self._max_rounds):
-            response = self._ask_gemini(model, contents, config)
+            reply = self._ask_groq(model, messages).choices[0].message
 
             # No tool requested: this is the final answer.
-            if not response.function_calls:
-                if not response.text:
-                    raise AgentError("Gemini returned an empty answer.")
-                return ChatResponse(answer=response.text, tools_used=tools_used)
+            if not reply.tool_calls:
+                if not reply.content:
+                    raise AgentError("Groq returned an empty answer.")
+                return ChatResponse(answer=reply.content, tools_used=tools_used)
 
-            # Gemini asked for tools. Remember its request...
-            contents.append(response.candidates[0].content)
+            # The AI asked for tools. Remember its request...
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": reply.content or "",
+                    "tool_calls": [
+                        {
+                            "id": call.id,
+                            "type": "function",
+                            "function": {
+                                "name": call.function.name,
+                                "arguments": call.function.arguments,
+                            },
+                        }
+                        for call in reply.tool_calls
+                    ],
+                }
+            )
 
-            # ...run each tool, and collect the results.
-            results = []
-            for call in response.function_calls:
-                result = run_tool(call.name, call.args or {})
-                if call.name in TOOLS:
-                    tools_used.append(call.name)
-                results.append(
-                    types.Part.from_function_response(name=call.name, response=result)
+            # ...run each tool, and send each result back with the call's id.
+            for call in reply.tool_calls:
+                name = call.function.name
+                result = run_tool(name, read_arguments(call.function.arguments))
+                if name in TOOLS:
+                    tools_used.append(name)
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "content": json.dumps(result),
+                    }
                 )
-
-            # Send the results back to Gemini in the next round.
-            # Gemini only accepts "user" or "model" here ("tool" gives a 400 error).
-            contents.append(types.Content(role="user", parts=results))
 
         raise AgentError("Too many tool calls; stopped to avoid a loop.")
 
-    def _ask_gemini(
-        self,
-        model: str,
-        contents: list[types.Content],
-        config: types.GenerateContentConfig,
-    ) -> types.GenerateContentResponse:
-        """One Gemini call, with the same retry rules as GeminiClient."""
+    def _ask_groq(self, model: str, messages: list[dict]):
+        """One Groq call, with the same retry rules as GroqClient."""
         retryer = make_retryer(self._wait, self._max_attempts)
         return retryer(
-            self._sdk.models.generate_content,
+            self._sdk.chat.completions.create,
             model=model,
-            contents=contents,
-            config=config,
+            messages=messages,
+            tools=TOOL_SCHEMAS,
+            tool_choice="auto",
+            temperature=0,
         )
 
 

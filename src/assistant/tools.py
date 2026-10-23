@@ -67,3 +67,36 @@ TOOLS = {
     "get_user_account": get_user_account,
     "check_order_status": check_order_status,
 }
+
+# What we tell the AI about each tool: its name, what it does, and its inputs.
+# Groq reads this (JSON schema format), it can't read our Python code.
+TOOL_SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_user_account",
+            "description": get_user_account.__doc__,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string", "description": "e.g. U001"}
+                },
+                "required": ["user_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_order_status",
+            "description": check_order_status.__doc__,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "order_id": {"type": "string", "description": "e.g. O105"}
+                },
+                "required": ["order_id"],
+            },
+        },
+    },
+]

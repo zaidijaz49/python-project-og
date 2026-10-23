@@ -1,10 +1,18 @@
 """Answer a question using only the doc chunks that search finds (the "G" in RAG)."""
 
-import os
 from typing import Protocol
 
-from dotenv import load_dotenv
+import groq
+from tenacity import wait_exponential
+from tenacity.wait import wait_base
 
+from assistant.client import (
+    DEFAULT_MODELS,
+    MAX_ATTEMPTS,
+    make_retryer,
+    sdk_from_env,
+    try_models,
+)
 from assistant.rag.embeddings import Embedder, LocalEmbedder
 from assistant.rag.store import load_index, search
 
@@ -12,8 +20,6 @@ from assistant.rag.store import load_index, search
 # send the AI no doc sections at all. Re-check it if the embedding model or docs
 # change.
 MIN_SCORE = 0.62
-
-DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
 
 # The AI starts its reply with this tag when the docs don't have the answer.
 # We remove the tag before the user sees the reply.
@@ -44,28 +50,36 @@ class LLM(Protocol):
 
 
 class GroqLLM:
-    """Calls the real Groq API."""
+    """Calls the real Groq API, with the same retries and model fallback as /analyze."""
 
-    def __init__(self, api_key: str, model: str = DEFAULT_GROQ_MODEL) -> None:
-        # Imported here so tests that use MockLLM don't need the groq package.
-        from groq import Groq
-
-        self.client = Groq(api_key=api_key)
-        self.model = model
+    def __init__(
+        self,
+        sdk_client: groq.Groq,
+        models: list[str] | None = None,
+        wait: wait_base | None = None,
+    ) -> None:
+        self._sdk = sdk_client
+        self._models = models or list(DEFAULT_MODELS)
+        # Waits 1s, 2s, 4s... between attempts. Tests pass wait_none() instead.
+        self._wait = wait or wait_exponential(multiplier=1, min=1, max=8)
 
     @classmethod
     def from_env(cls) -> "GroqLLM":
-        """Build it from GROQ_API_KEY and GROQ_MODEL in .env."""
-        load_dotenv()
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            raise RuntimeError("GROQ_API_KEY is not set. Add it to your .env file.")
-        model = os.getenv("GROQ_MODEL") or DEFAULT_GROQ_MODEL
-        return cls(api_key, model)
+        """Build it from GROQ_API_KEY and GROQ_MODELS (or GROQ_MODEL) in .env."""
+        sdk, models = sdk_from_env()
+        return cls(sdk, models)
 
     def complete(self, system: str, user: str) -> str:
-        response = self.client.chat.completions.create(
-            model=self.model,
+        retryer = make_retryer(self._wait, MAX_ATTEMPTS)
+        text, _model = try_models(
+            self._models, lambda model: retryer(self._generate, model, system, user)
+        )
+        return text
+
+    def _generate(self, model: str, system: str, user: str) -> str:
+        """One single call to one Groq model."""
+        response = self._sdk.chat.completions.create(
+            model=model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},

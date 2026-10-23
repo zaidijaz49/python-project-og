@@ -1,9 +1,8 @@
-"""Tests for the FastAPI app. The real Gemini client is swapped for fakes."""
+"""Tests for the FastAPI app. The real Groq clients are swapped for fakes."""
 
 import groq
 import httpx
 from fastapi.testclient import TestClient
-from google.genai import errors
 
 from assistant.agent import AgentError, MockAgent
 from assistant.api import app, get_agent, get_cache, get_client, get_rag
@@ -21,11 +20,17 @@ class BrokenClient:
         raise AIResponseError("bad data")
 
 
+def groq_down():
+    """The error Groq's SDK raises when it can't be reached."""
+    request = httpx.Request("POST", "https://api.groq.com")
+    return groq.APIConnectionError(request=request)
+
+
 class BusyClient:
     """Fake client whose AI is always busy."""
 
     def analyze(self, text):
-        raise errors.ServerError(503, {})
+        raise groq_down()
 
 
 class LoopingAgent:
@@ -39,16 +44,16 @@ class BusyAgent:
     """Fake agent whose AI is always busy."""
 
     def chat(self, message):
-        raise errors.ServerError(503, {})
+        raise groq_down()
 
 
 def use_client(fake):
-    """Tell FastAPI: use this fake instead of the real GeminiClient."""
+    """Tell FastAPI: use this fake instead of the real GroqClient."""
     app.dependency_overrides[get_client] = lambda: fake
 
 
 def use_agent(fake):
-    """Tell FastAPI: use this fake instead of the real GeminiAgent."""
+    """Tell FastAPI: use this fake instead of the real GroqAgent."""
     app.dependency_overrides[get_agent] = lambda: fake
 
 
@@ -71,8 +76,7 @@ class BusyRag:
     """Fake RAG assistant whose AI (Groq) is always down."""
 
     def ask(self, question):
-        request = httpx.Request("POST", "https://api.groq.com")
-        raise groq.APIConnectionError(request=request)
+        raise groq_down()
 
 
 def use_rag(fake, cache=None):
@@ -173,7 +177,7 @@ def test_chat_returns_answer_and_tools_used():
         ChatResponse(
             answer="Your headphones have been shipped.",
             tools_used=["check_order_status"],
-            model_used="gemini-test",
+            model_used="groq-test",
         )
     )
     use_agent(mock)
@@ -184,7 +188,7 @@ def test_chat_returns_answer_and_tools_used():
     assert response.json() == {
         "answer": "Your headphones have been shipped.",
         "tools_used": ["check_order_status"],
-        "model_used": "gemini-test",
+        "model_used": "groq-test",
     }
     assert mock.calls == ["Where is my order O105?"]
 
