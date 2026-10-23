@@ -7,7 +7,7 @@ import groq
 from tenacity import wait_exponential
 from tenacity.wait import wait_base
 
-from assistant.client import (
+from assistant.groq_utils import (
     DEFAULT_MODELS,
     MAX_ATTEMPTS,
     make_retryer,
@@ -149,7 +149,7 @@ class GroqAgent:
         raise AgentError("Too many tool calls; stopped to avoid a loop.")
 
     def _ask_groq(self, model: str, messages: list[dict]):
-        """One Groq call, with the same retry rules as GroqClient."""
+        """One Groq call, with the shared retry rules from groq_utils."""
         retryer = make_retryer(self._wait, self._max_attempts)
         return retryer(
             self._sdk.chat.completions.create,

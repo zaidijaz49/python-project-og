@@ -7,11 +7,8 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException
 
 from assistant.agent import AgentError, ChatAgent, GroqAgent
 from assistant.cache import SimpleCache
-from assistant.client import AIClient, AIResponseError, GroqClient
 from assistant.guardrails import GuardrailError, check_text
 from assistant.models import (
-    Analysis,
-    AnalyzeRequest,
     AskRequest,
     AskResponse,
     ChatRequest,
@@ -24,11 +21,6 @@ app = FastAPI(title="Customer Support Assistant")
 # Every endpoint lives under /api/v1. If we ever change the API in a way that
 # breaks old apps, we add /api/v2 and v1 keeps working.
 router = APIRouter(prefix="/api/v1")
-
-
-def get_client() -> AIClient:
-    """Give FastAPI the AI client. Tests replace this with MockClient."""
-    return GroqClient.from_env()
 
 
 def get_agent() -> ChatAgent:
@@ -60,32 +52,6 @@ def get_cache() -> SimpleCache:
 def health():
     """Simple check: is the server running?"""
     return {"status": "ok"}
-
-
-@router.post("/ai/analyze")
-def analyze(
-    request: AnalyzeRequest, client: AIClient = Depends(get_client)
-) -> Analysis:
-    """Take user text, send it to the AI, return summary + sentiment + tags."""
-    try:
-        safe_text = check_text(request.text)  # first the guard
-        return client.analyze(safe_text)  # then the AI
-
-    except GuardrailError as exc:
-        # The guard blocked the text. The AI was never called.
-        raise HTTPException(status_code=400, detail=str(exc)) from None
-
-    except AIResponseError:
-        # The AI answered, but the answer was broken.
-        raise HTTPException(
-            status_code=502, detail="AI returned invalid data"
-        ) from None
-
-    except groq.APIError:
-        # Groq is busy or down (even after 3 tries), or the key is wrong.
-        raise HTTPException(
-            status_code=503, detail="AI service is unavailable"
-        ) from None
 
 
 @router.post("/ai/chat")

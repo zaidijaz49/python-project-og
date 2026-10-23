@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "assistant"
 version = "0.1.0"
-description = "AI customer support assistant: text analysis, tool-calling chat and RAG over help docs, via Groq"
+description = "AI customer support assistant: tool-calling chat and RAG over help docs, via Groq"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2",

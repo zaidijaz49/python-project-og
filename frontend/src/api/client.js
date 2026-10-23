@@ -16,14 +16,6 @@ const CHAT_ERRORS = {
   503: "Sorry, I'm a little busy right now. Please try again in a minute.",
 };
 
-const REVIEW_ERRORS = {
-  ...COMMON_ERRORS,
-  400: "Sorry, we couldn't accept this review. Please write about the product.",
-  422: "Sorry, this review looks empty or too long.",
-  502: "Sorry, we couldn't analyze your review. Please try again.",
-  503: "Sorry, review analysis is busy right now. Please try again in a minute.",
-};
-
 export class ApiError extends Error {
   constructor(kind, messages) {
     super(messages[kind] ?? messages[503]);
@@ -57,5 +49,4 @@ async function request(path, body, messages = CHAT_ERRORS) {
 export const api = {
   health: () => request("/health"),
   chat: (message) => request("/ai/chat", { message }, CHAT_ERRORS),
-  analyze: (text) => request("/ai/analyze", { text }, REVIEW_ERRORS),
 };

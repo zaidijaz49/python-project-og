@@ -6,7 +6,7 @@ import groq
 from tenacity import wait_exponential
 from tenacity.wait import wait_base
 
-from assistant.client import (
+from assistant.groq_utils import (
     DEFAULT_MODELS,
     MAX_ATTEMPTS,
     make_retryer,
@@ -50,7 +50,7 @@ class LLM(Protocol):
 
 
 class GroqLLM:
-    """Calls the real Groq API, with the same retries and model fallback as /analyze."""
+    """Calls the real Groq API, with the same retries and fallback as the agent."""
 
     def __init__(
         self,
