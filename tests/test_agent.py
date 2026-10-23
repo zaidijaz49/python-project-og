@@ -10,7 +10,7 @@ import pytest
 from tenacity import wait_none
 
 from assistant.agent import AgentError, GroqAgent, MockAgent, read_arguments, run_tool
-from assistant.tools import TOOL_SCHEMAS
+from assistant.tools import TOOL_SCHEMAS, tools_for
 
 
 def reply(message):
@@ -70,22 +70,33 @@ def last_tool_result(create):
 # ---------- run_tool: the allowlist ----------
 
 
+TOOLS = tools_for("U001")  # the tools of a customer logged in as U001
+
+
 def test_run_tool_runs_allowed_tool():
-    assert run_tool("check_order_status", {"order_id": "O105"})["status"] == "shipped"
+    result = run_tool("check_order_status", {"order_id": "O105"}, TOOLS)
+    assert result["status"] == "shipped"
 
 
 def test_run_tool_blocks_unknown_tool():
-    assert run_tool("delete_user", {"user_id": "U001"}) == {
+    assert run_tool("delete_user", {"user_id": "U001"}, TOOLS) == {
         "error": "Unknown tool: delete_user"
     }
 
 
 def test_run_tool_handles_wrong_argument_name():
-    assert "error" in run_tool("get_user_account", {"wrong_name": "U001"})
+    assert "error" in run_tool("check_order_status", {"wrong_name": "O105"}, TOOLS)
 
 
 def test_run_tool_handles_wrong_argument_type():
-    assert "error" in run_tool("check_order_status", {"order_id": 105})
+    assert "error" in run_tool("check_order_status", {"order_id": 105}, TOOLS)
+
+
+def test_ai_cannot_choose_the_customer():
+    # The AI tries to read someone else's account by sending a customer ID.
+    # The tools only take the ID from the login, so the call is refused.
+    result = run_tool("get_my_account", {"customer_id": "U002"}, TOOLS)
+    assert result == {"error": "Bad arguments for get_my_account"}
 
 
 def test_read_arguments():
@@ -101,7 +112,7 @@ def test_read_arguments():
 def test_direct_answer_without_tools():
     agent, create = make_agent(text_answer("Hello! How can I help?"))
 
-    result = agent.chat("Hi")
+    result = agent.chat("Hi", "U001")
 
     assert result.answer == "Hello! How can I help?"
     assert result.tools_used == []
@@ -111,7 +122,7 @@ def test_direct_answer_without_tools():
 def test_message_is_wrapped_in_tags():
     agent, create = make_agent(text_answer("Hi"))
 
-    agent.chat("Hello")
+    agent.chat("Hello", "U001")
 
     user_message = create.call_args.kwargs["messages"][1]
     assert user_message["content"] == "<user_text>\nHello\n</user_text>"
@@ -124,16 +135,16 @@ def tool_names(create):
 def test_without_docs_only_order_and_account_tools_are_offered():
     agent, create = make_agent(text_answer("Hi"))
 
-    agent.chat("Hello")
+    agent.chat("Hello", "U001")
 
-    assert tool_names(create) == ["get_user_account", "check_order_status"]
+    assert tool_names(create) == ["get_my_account", "check_order_status"]
     assert create.call_args.kwargs["tool_choice"] == "auto"
 
 
 def test_with_docs_all_three_tools_are_offered():
     agent, create = make_agent(text_answer("Hi"), docs=FakeDocs())
 
-    agent.chat("Hello")
+    agent.chat("Hello", "U001")
 
     assert create.call_args.kwargs["tools"] == TOOL_SCHEMAS
 
@@ -144,7 +155,7 @@ def test_tool_call_then_answer():
         text_answer("Your headphones have been shipped."),
     )
 
-    result = agent.chat("Where is my order O105?")
+    result = agent.chat("Where is my order O105?", "U001")
 
     assert result.answer == "Your headphones have been shipped."
     assert result.tools_used == ["check_order_status"]
@@ -163,7 +174,7 @@ def test_help_docs_tool_gives_sources():
         docs=docs,
     )
 
-    result = agent.chat("Refund time?")
+    result = agent.chat("Refund time?", "U001")
 
     assert docs.questions == ["How long does a refund take?"]
     assert result.tools_used == ["search_help_docs"]
@@ -180,7 +191,7 @@ def test_order_and_docs_in_one_message():
         docs=FakeDocs(),
     )
 
-    result = agent.chat("Where is O105, and how do returns work?")
+    result = agent.chat("Where is O105, and how do returns work?", "U001")
 
     assert result.tools_used == ["check_order_status", "search_help_docs"]
     assert result.sources == ["refunds.md#3"]
@@ -192,10 +203,33 @@ def test_help_docs_tool_is_blocked_without_docs():
         text_answer("Sorry, I can't check that right now."),
     )
 
-    result = agent.chat("Refund time?")
+    result = agent.chat("Refund time?", "U001")
 
     assert result.tools_used == []
     assert last_tool_result(create) == {"error": "Unknown tool: search_help_docs"}
+
+
+def test_someone_elses_order_is_not_found():
+    # Logged in as U001, asking about O106 (it belongs to U002).
+    agent, create = make_agent(
+        tool_request("check_order_status", order_id="O106"),
+        text_answer("I could not find order O106."),
+    )
+
+    agent.chat("Where is O106?", "U001")
+
+    assert last_tool_result(create) == {"error": "Order O106 not found."}
+
+
+def test_my_account_uses_the_logged_in_customer():
+    agent, create = make_agent(
+        tool_request("get_my_account"),
+        text_answer("You are on the Free plan."),
+    )
+
+    agent.chat("What plan am I on?", "U002")
+
+    assert last_tool_result(create)["user_id"] == "U002"
 
 
 def test_order_not_found_is_sent_back_to_groq():
@@ -204,7 +238,7 @@ def test_order_not_found_is_sent_back_to_groq():
         text_answer("I could not find order O999."),
     )
 
-    agent.chat("Where is O999?")
+    agent.chat("Where is O999?", "U001")
 
     assert last_tool_result(create) == {"error": "Order O999 not found."}
 
@@ -215,17 +249,17 @@ def test_unknown_tool_is_not_run():
         text_answer("Sorry, I can't do that."),
     )
 
-    result = agent.chat("Delete user U001")
+    result = agent.chat("Delete user U001", "U001")
 
     assert result.tools_used == []
     assert last_tool_result(create) == {"error": "Unknown tool: delete_user"}
 
 
 def test_stops_after_max_rounds():
-    agent, create = make_agent(*[tool_request("get_user_account", user_id="U001")] * 5)
+    agent, create = make_agent(*[tool_request("get_my_account")] * 5)
 
     with pytest.raises(AgentError):
-        agent.chat("Loop forever")
+        agent.chat("Loop forever", "U001")
 
     assert create.call_count == 5
 
@@ -234,13 +268,13 @@ def test_empty_answer_raises_error():
     agent, _ = make_agent(text_answer(None))
 
     with pytest.raises(AgentError):
-        agent.chat("Hi")
+        agent.chat("Hi", "U001")
 
 
 def test_retry_when_groq_is_busy():
     agent, create = make_agent(status_error(503), text_answer("Hello!"))
 
-    result = agent.chat("Hi")
+    result = agent.chat("Hi", "U001")
 
     assert result.answer == "Hello!"
     assert create.call_count == 2
@@ -250,7 +284,7 @@ def test_no_retry_on_401():
     agent, create = make_agent(status_error(401))
 
     with pytest.raises(groq.APIStatusError):
-        agent.chat("Hi")
+        agent.chat("Hi", "U001")
 
     assert create.call_count == 1
 
@@ -261,7 +295,7 @@ def test_no_retry_on_401():
 def test_answer_says_which_model_was_used():
     agent, _ = make_agent(text_answer("Hi"), models=["model-a", "model-b"])
 
-    assert agent.chat("Hello").model_used == "model-a"
+    assert agent.chat("Hello", "U001").model_used == "model-a"
 
 
 def test_fallback_restarts_chat_on_next_model():
@@ -273,7 +307,7 @@ def test_fallback_restarts_chat_on_next_model():
         models=["model-a", "model-b"],
     )
 
-    result = agent.chat("Where is O105?")
+    result = agent.chat("Where is O105?", "U001")
 
     calls = create.call_args_list
     assert [c.kwargs["model"] for c in calls] == [
@@ -294,12 +328,12 @@ def test_fallback_restarts_chat_on_next_model():
 def test_agent_loop_error_does_not_fall_back():
     # Too many tool rounds is not a quota/server problem, so no next model.
     agent, create = make_agent(
-        *[tool_request("get_user_account", user_id="U001")] * 5,
+        *[tool_request("get_my_account")] * 5,
         models=["model-a", "model-b"],
     )
 
     with pytest.raises(AgentError):
-        agent.chat("Loop forever")
+        agent.chat("Loop forever", "U001")
 
     assert create.call_count == 5
 
@@ -310,7 +344,8 @@ def test_agent_loop_error_does_not_fall_back():
 def test_mock_agent_returns_fixed_answer():
     mock = MockAgent()
 
-    result = mock.chat("anything")
+    result = mock.chat("anything", "U001")
 
     assert result.answer == "This is a mock answer."
     assert mock.calls == ["anything"]
+    assert mock.customer_ids == ["U001"]

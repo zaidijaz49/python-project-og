@@ -5,7 +5,8 @@ import httpx
 from fastapi.testclient import TestClient
 
 from assistant.agent import AgentError, MockAgent
-from assistant.api import app, get_agent, get_cache
+from assistant.api import app, get_agent, get_auth, get_cache, get_current_customer
+from assistant.auth import AuthError
 from assistant.cache import SimpleCache
 from assistant.models import ChatResponse
 
@@ -21,22 +22,33 @@ def groq_down():
 class LoopingAgent:
     """Fake agent that never finishes (too many tool rounds)."""
 
-    def chat(self, message):
+    def chat(self, message, customer_id):
         raise AgentError("too many rounds")
 
 
 class BusyAgent:
     """Fake agent whose AI is always busy."""
 
-    def chat(self, message):
+    def chat(self, message, customer_id):
         raise groq_down()
 
 
-def use_agent(fake, cache=None):
-    """Tell FastAPI: use this fake agent and a cache of our own (empty by default)."""
+class FakeAuth:
+    """Fake login checker: the token "good-token" is customer U002."""
+
+    def customer_id(self, token):
+        if token != "good-token":
+            raise AuthError("Invalid or expired login.")
+        return "U002"
+
+
+def use_agent(fake, cache=None, customer_id="U001"):
+    """Tell FastAPI: use this fake agent, a cache of our own (empty by default),
+    and pretend this customer is logged in."""
     cache = cache or SimpleCache()
     app.dependency_overrides[get_agent] = lambda: fake
     app.dependency_overrides[get_cache] = lambda: cache
+    app.dependency_overrides[get_current_customer] = lambda: customer_id
 
 
 def teardown_function():
@@ -238,3 +250,57 @@ def test_errors_are_not_cached():
     assert response.status_code == 200
     assert response.json()["cached"] is False
     assert agent.calls == ["Refund time?"]
+
+
+# ---------- login (Authorization header) ----------
+
+
+def use_real_login_check(agent):
+    """Use the real get_current_customer, but with FakeAuth (no Supabase)."""
+    app.dependency_overrides[get_agent] = lambda: agent
+    app.dependency_overrides[get_cache] = lambda: SimpleCache()
+    app.dependency_overrides[get_auth] = lambda: FakeAuth()
+
+
+def test_chat_without_login_returns_401():
+    agent = MockAgent()
+    use_real_login_check(agent)
+
+    response = http.post("/api/v1/ai/chat", json={"message": "Where is O105?"})
+
+    assert response.status_code == 401
+    assert agent.calls == []  # the AI was never called
+
+
+def test_chat_with_bad_token_returns_401():
+    agent = MockAgent()
+    use_real_login_check(agent)
+
+    response = http.post(
+        "/api/v1/ai/chat",
+        json={"message": "Where is O105?"},
+        headers={"Authorization": "Bearer fake-token"},
+    )
+
+    assert response.status_code == 401
+    assert agent.calls == []
+
+
+def test_chat_with_good_token_passes_the_customer_to_the_agent():
+    agent = MockAgent()
+    use_real_login_check(agent)
+
+    response = http.post(
+        "/api/v1/ai/chat",
+        json={"message": "What plan am I on?"},
+        headers={"Authorization": "Bearer good-token"},
+    )
+
+    assert response.status_code == 200
+    assert agent.customer_ids == ["U002"]  # from the token, not from the message
+
+
+def test_health_needs_no_login():
+    app.dependency_overrides[get_auth] = lambda: FakeAuth()
+
+    assert http.get("/api/v1/health").status_code == 200

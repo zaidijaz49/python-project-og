@@ -15,6 +15,7 @@ dependencies = [
     "uvicorn[standard]",
     "fastembed",
     "groq",
+     "pyjwt[crypto]"
 ]
 
 [project.optional-dependencies]

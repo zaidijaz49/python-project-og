@@ -7,7 +7,7 @@ export const MAX_MESSAGE_LENGTH = 2000; // same limit as the backend (ChatReques
 const WELCOME = {
   id: "welcome",
   role: "bot",
-  text: "Hi! I'm Robo, the TechMart assistant. I can track your orders and check your account. How can I help?",
+  text: "Hi! I'm Robo, the TechMart assistant. I can track your orders, check your account and answer questions about refunds, shipping and payments. How can I help?",
 };
 
 function loadMessages() {
@@ -80,5 +80,10 @@ export function useChat() {
     if (!loading) setMessages([WELCOME]);
   }
 
-  return { messages, loading, send, retry, clear };
+  // On logout: always forget the chat, so the next person can't read it.
+  function reset() {
+    setMessages([WELCOME]);
+  }
+
+  return { messages, loading, send, retry, clear, reset };
 }

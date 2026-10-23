@@ -4,8 +4,10 @@ from functools import lru_cache
 
 import groq
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from assistant.agent import AgentError, ChatAgent, GroqAgent
+from assistant.auth import AuthError, SupabaseAuth
 from assistant.cache import SimpleCache
 from assistant.guardrails import GuardrailError, check_text
 from assistant.models import ChatRequest, ChatResponse
@@ -39,6 +41,34 @@ def get_cache() -> SimpleCache:
     return answer_cache
 
 
+@lru_cache
+def get_auth() -> SupabaseAuth:
+    """Give FastAPI the login checker. Built once, so Supabase's public keys
+    are downloaded only once. Tests replace this with a fake."""
+    return SupabaseAuth.from_env()
+
+
+# Reads the "Authorization: Bearer <token>" header. auto_error=False: if the
+# header is missing we send our own 401 below instead of FastAPI's 403.
+bearer = HTTPBearer(auto_error=False)
+
+
+def get_current_customer(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    auth: SupabaseAuth = Depends(get_auth),
+) -> str:
+    """Who is asking? Returns their customer ID (e.g. "U001") or stops with 401.
+
+    Like an Express auth middleware that sets req.user.
+    """
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Please log in first.")
+    try:
+        return auth.customer_id(credentials.credentials)
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from None
+
+
 @router.get("/health")
 def health():
     """Simple check: is the server running?"""
@@ -48,6 +78,7 @@ def health():
 @router.post("/ai/chat")
 def chat(
     request: ChatRequest,
+    customer_id: str = Depends(get_current_customer),  # 401 if not logged in
     agent: ChatAgent = Depends(get_agent),
     cache: SimpleCache = Depends(get_cache),
 ) -> ChatResponse:
@@ -60,7 +91,8 @@ def chat(
         if saved is not None:
             return ChatResponse(**saved, cached=True)
 
-        response = agent.chat(safe_message)  # then the agent (Groq + tools)
+        # Then the agent (Groq + tools), only allowed to see THIS customer's data.
+        response = agent.chat(safe_message, customer_id)
 
         # Only answers without anyone's own data are safe to share. Errors jump
         # to "except" below, so they are never saved either.
