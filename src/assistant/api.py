@@ -1,5 +1,6 @@
 """FastAPI app: the door through which users talk to our AI chatbot."""
 
+import logging
 from functools import lru_cache
 
 import groq
@@ -12,6 +13,11 @@ from assistant.cache import SimpleCache
 from assistant.guardrails import GuardrailError, check_text
 from assistant.models import ChatRequest, ChatResponse
 from assistant.tools import PERSONAL_TOOLS
+
+# Show our INFO log lines (like the token usage) in the uvicorn terminal.
+# Without this, Python only prints warnings and errors.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
+logger = logging.getLogger("assistant")
 
 app = FastAPI(title="Customer Support Assistant")
 
@@ -89,6 +95,7 @@ def chat(
         # Asked before? Return the saved answer and skip the AI.
         saved = cache.get(safe_message)
         if saved is not None:
+            logger.info("Tokens: 0 (answered from cache) | cost: $0")
             return ChatResponse(**saved, cached=True)
 
         # Then the agent (Groq + tools), only allowed to see THIS customer's data.
