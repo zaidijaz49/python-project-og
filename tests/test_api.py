@@ -304,3 +304,13 @@ def test_health_needs_no_login():
     app.dependency_overrides[get_auth] = lambda: FakeAuth()
 
     assert http.get("/api/v1/health").status_code == 200
+
+
+def test_cache_hit_logs_zero_tokens(caplog):
+    caplog.set_level("INFO", logger="assistant")
+    use_agent(policy_agent())
+
+    http.post("/api/v1/ai/chat", json={"message": "Refund time?"})
+    http.post("/api/v1/ai/chat", json={"message": "Refund time?"})
+
+    assert "Tokens: 0 (answered from cache)" in caplog.text
