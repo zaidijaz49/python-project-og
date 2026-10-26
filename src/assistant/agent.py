@@ -20,6 +20,7 @@ from assistant.groq_utils import (
 from assistant.models import ChatResponse
 from assistant.rag.docs import HelpDocs
 from assistant.tools import TOOL_SCHEMAS, tools_for
+from assistant.usage import TokenUsage
 
 MAX_ROUNDS = 5  # stop if the AI keeps asking for tools, so we never loop forever
 
@@ -125,6 +126,18 @@ class GroqAgent:
     def _chat_with_model(
         self, model: str, message: str, tools: dict[str, Callable]
     ) -> ChatResponse:
+        """Run the chat on one model and log how many tokens it used."""
+        usage = TokenUsage()
+        try:
+            return self._tool_loop(model, message, tools, usage)
+        finally:
+            # Logged even if the chat failed halfway: those tokens were used too.
+            if usage.calls:
+                usage.log(model)
+
+    def _tool_loop(
+        self, model: str, message: str, tools: dict[str, Callable], usage: TokenUsage
+    ) -> ChatResponse:
         """The tool-calling loop, using one model from start to finish."""
         # The whole conversation so far. We keep adding to it each round.
         messages = [
@@ -135,7 +148,9 @@ class GroqAgent:
         sources: list[str] = []  # help doc sections the answer is based on
 
         for _ in range(self._max_rounds):
-            reply = self._ask_groq(model, messages).choices[0].message
+            response = self._ask_groq(model, messages)
+            usage.add(response.usage)  # Groq tells us the tokens of every call
+            reply = response.choices[0].message
 
             # No tool requested: this is the final answer.
             if not reply.tool_calls:

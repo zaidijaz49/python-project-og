@@ -14,8 +14,10 @@ from assistant.tools import TOOL_SCHEMAS, tools_for
 
 
 def reply(message):
-    """Wrap a message the way Groq does: response.choices[0].message."""
-    return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+    """Wrap a message the way Groq does: response.choices[0].message, plus the
+    token count of the call (every fake call uses 100 in, 10 out)."""
+    usage = SimpleNamespace(prompt_tokens=100, completion_tokens=10)
+    return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=usage)
 
 
 def text_answer(text):
@@ -349,3 +351,33 @@ def test_mock_agent_returns_fixed_answer():
     assert result.answer == "This is a mock answer."
     assert mock.calls == ["anything"]
     assert mock.customer_ids == ["U001"]
+
+
+# ---------- token usage log ----------
+
+
+def test_tokens_of_all_calls_are_added_and_logged(caplog):
+    caplog.set_level("INFO", logger="assistant")
+    agent, _ = make_agent(
+        tool_request("check_order_status", order_id="O105"),
+        text_answer("Your headphones have been shipped."),
+        models=["openai/gpt-oss-120b"],
+    )
+
+    agent.chat("Where is O105?", "U001")
+
+    # 2 calls x (100 in, 10 out). Cost: 200 x $0.15/M + 20 x $0.60/M = $0.000042
+    assert caplog.messages == [
+        "Tokens: 200 in, 20 out (2 calls) | model: openai/gpt-oss-120b"
+        " | cost: ~$0.000042"
+    ]
+
+
+def test_tokens_are_logged_even_when_the_chat_fails(caplog):
+    caplog.set_level("INFO", logger="assistant")
+    agent, _ = make_agent(*[tool_request("get_my_account")] * 5)
+
+    with pytest.raises(AgentError):
+        agent.chat("Loop forever", "U001")
+
+    assert "Tokens: 500 in, 50 out (5 calls)" in caplog.text
